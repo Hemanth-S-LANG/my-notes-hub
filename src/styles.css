@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Dancing+Script:wght@400;700&family=Shadows+Into+Light&family=Patrick+Hand&family=Architects+Daughter&family=Kalam:wght@300;400;700&display=swap");
 @import "tailwindcss" source(none);
 @source "../src";
 @import "tw-animate-css";
@@ -184,4 +185,38 @@
   border-radius: 0.25rem;
   font-family: ui-monospace, monospace;
   font-size: 0.875em;
+}
+
+/* Block-based editor */
+.block-text:empty:before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+.block-wrapper {
+  position: relative;
+  border-radius: 0.5rem;
+  padding: 6px 8px;
+  transition: background 0.15s;
+}
+.block-wrapper:hover { background: color-mix(in oklab, var(--muted) 50%, transparent); }
+.block-wrapper.is-selected { background: color-mix(in oklab, var(--primary) 8%, transparent); outline: 2px solid color-mix(in oklab, var(--primary) 40%, transparent); }
+.block-handle {
+  position: absolute;
+  left: -28px;
+  top: 10px;
+  opacity: 0;
+  cursor: grab;
+  transition: opacity 0.15s;
+  color: var(--muted-foreground);
+}
+.block-wrapper:hover .block-handle, .block-wrapper.is-selected .block-handle { opacity: 1; }
+.block-handle:active { cursor: grabbing; }
+.image-canvas {
+  position: relative;
+  width: 100%;
+  min-height: 360px;
+  border: 1px dashed color-mix(in oklab, var(--border) 80%, transparent);
+  border-radius: 0.75rem;
+  overflow: hidden;
 }

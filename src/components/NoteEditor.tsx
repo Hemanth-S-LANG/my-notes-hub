@@ -1,17 +1,26 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import {
-  Bold, Italic, Underline as UnderlineIcon, List, ListOrdered, Heading1, Heading2,
-  Quote, Code as CodeIcon, Link as LinkIcon, Image as ImageIcon, Paperclip,
-  Download, Trash2, Undo2, Redo2, FileText,
+  DndContext, closestCenter, PointerSensor, useSensor, useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext, arrayMove, useSortable, verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  Type, Image as ImageIcon, Minus, Paperclip, Download, Trash2, GripVertical, FileText, Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
 import {
-  Note, Attachment, fileToDataUrl, attachmentKind, uid,
+  Note, Block, Attachment, fileToDataUrl, attachmentKind, uid,
+  newTextBlock, newImageBlock, newDividerBlock,
 } from "@/lib/notes-store";
+import { TextBlockView } from "./blocks/TextBlockView";
+import { ImageBlockView } from "./blocks/ImageBlockView";
+import { DividerBlockView } from "./blocks/DividerBlockView";
 import { toast } from "sonner";
 
 interface Props {
@@ -20,133 +29,117 @@ interface Props {
   onDelete: (id: string) => void;
 }
 
-export function NoteEditor({ note, onChange, onDelete }: Props) {
-  const editorRef = useRef<HTMLDivElement>(null);
-  const exportRef = useRef<HTMLDivElement>(null);
-  const [title, setTitle] = useState(note.title);
+// Migrate legacy notes (HTML content -> single text block)
+function getBlocks(note: Note): Block[] {
+  if (note.blocks && note.blocks.length) return note.blocks;
+  if (note.content) return [newTextBlock(note.content)];
+  return [newTextBlock("")];
+}
 
-  // Sync editor content when note changes (switching notes)
+export function NoteEditor({ note, onChange, onDelete }: Props) {
+  const [title, setTitle] = useState(note.title);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const exportRef = useRef<HTMLDivElement>(null);
+  const blocks = useMemo(() => getBlocks(note), [note]);
+
   useEffect(() => {
     setTitle(note.title);
-    if (editorRef.current && editorRef.current.innerHTML !== note.content) {
-      editorRef.current.innerHTML = note.content || "";
-    }
+    setSelectedId(null);
   }, [note.id]);
 
   const update = (patch: Partial<Note>) => {
     onChange({ ...note, ...patch, updatedAt: Date.now() });
   };
 
-  const exec = (cmd: string, val?: string) => {
-    document.execCommand(cmd, false, val);
-    if (editorRef.current) update({ content: editorRef.current.innerHTML });
-    editorRef.current?.focus();
+  const setBlocks = (next: Block[]) => update({ blocks: next });
+
+  const updateBlock = (id: string, b: Block) =>
+    setBlocks(blocks.map((x) => (x.id === id ? b : x)));
+
+  const deleteBlock = (id: string) => {
+    const next = blocks.filter((b) => b.id !== id);
+    setBlocks(next.length ? next : [newTextBlock("")]);
   };
 
-  const handleInput = () => {
-    if (editorRef.current) update({ content: editorRef.current.innerHTML });
+  const addBlock = (b: Block, afterId?: string) => {
+    if (!afterId) { setBlocks([...blocks, b]); return; }
+    const idx = blocks.findIndex((x) => x.id === afterId);
+    const next = [...blocks];
+    next.splice(idx + 1, 0, b);
+    setBlocks(next);
+    setSelectedId(b.id);
   };
 
-  const insertLink = () => {
-    const url = window.prompt("Enter URL (include https://)");
-    if (!url) return;
-    exec("createLink", url);
-  };
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  const insertImage = async (file: File) => {
-    const dataUrl = await fileToDataUrl(file);
-    exec("insertImage", dataUrl);
-    const att: Attachment = {
-      id: uid(), name: file.name, type: file.type, dataUrl,
-      size: file.size, kind: "image",
-    };
-    update({ attachments: [...note.attachments, att] });
+  const onDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const oldIdx = blocks.findIndex((b) => b.id === active.id);
+    const newIdx = blocks.findIndex((b) => b.id === over.id);
+    setBlocks(arrayMove(blocks, oldIdx, newIdx));
   };
 
   const onAttachFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
+    if (!files?.length) return;
     const newAtts: Attachment[] = [];
     for (const file of Array.from(files)) {
       try {
         const dataUrl = await fileToDataUrl(file);
         const kind = attachmentKind(file.type);
         if (kind === "image") {
-          await insertImage(file);
+          // load to detect natural size for sensible default
+          const img = new Image();
+          img.src = dataUrl;
+          await new Promise((r) => (img.onload = r));
+          const maxW = 520;
+          const w = Math.min(img.naturalWidth, maxW);
+          const h = (img.naturalHeight * w) / img.naturalWidth;
+          addBlock(newImageBlock(dataUrl, file.name, w, h), selectedId ?? blocks[blocks.length - 1]?.id);
           continue;
         }
-        newAtts.push({
-          id: uid(), name: file.name, type: file.type, dataUrl,
-          size: file.size, kind,
-        });
+        newAtts.push({ id: uid(), name: file.name, type: file.type, dataUrl, size: file.size, kind });
       } catch {
         toast.error(`Failed to attach ${file.name}`);
       }
     }
-    if (newAtts.length) {
-      update({ attachments: [...note.attachments, ...newAtts] });
-      toast.success(`${newAtts.length} file(s) attached`);
-    }
-  };
-
-  const removeAttachment = (id: string) => {
-    update({ attachments: note.attachments.filter((a) => a.id !== id) });
+    if (newAtts.length) update({ attachments: [...note.attachments, ...newAtts] });
   };
 
   const downloadAttachment = (a: Attachment) => {
     const link = document.createElement("a");
-    link.href = a.dataUrl;
-    link.download = a.name;
-    link.click();
+    link.href = a.dataUrl; link.download = a.name; link.click();
   };
+  const removeAttachment = (id: string) =>
+    update({ attachments: note.attachments.filter((a) => a.id !== id) });
 
   const exportPdf = async () => {
     const node = exportRef.current;
     if (!node) return;
     toast.loading("Generating PDF…", { id: "pdf" });
     try {
-      const canvas = await html2canvas(node, {
-        backgroundColor: "#ffffff",
-        scale: 2,
-      });
+      const canvas = await html2canvas(node, { backgroundColor: "#ffffff", scale: 2 });
       const imgData = canvas.toDataURL("image/png");
       const pdf = new jsPDF("p", "mm", "a4");
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgWidth = pageWidth - 20;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      let heightLeft = imgHeight;
-      let position = 10;
-      pdf.addImage(imgData, "PNG", 10, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight - 20;
-      while (heightLeft > 0) {
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const imgW = pageW - 20;
+      const imgH = (canvas.height * imgW) / canvas.width;
+      let left = imgH; let pos = 10;
+      pdf.addImage(imgData, "PNG", 10, pos, imgW, imgH);
+      left -= pageH - 20;
+      while (left > 0) {
         pdf.addPage();
-        position = 10 - (imgHeight - heightLeft);
-        pdf.addImage(imgData, "PNG", 10, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight - 20;
+        pos = 10 - (imgH - left);
+        pdf.addImage(imgData, "PNG", 10, pos, imgW, imgH);
+        left -= pageH - 20;
       }
       pdf.save(`${note.title || "note"}.pdf`);
       toast.success("PDF downloaded", { id: "pdf" });
-    } catch (e) {
+    } catch {
       toast.error("PDF export failed", { id: "pdf" });
     }
   };
-
-  const tools = [
-    { icon: Undo2, cmd: "undo", label: "Undo" },
-    { icon: Redo2, cmd: "redo", label: "Redo" },
-    { sep: true },
-    { icon: Heading1, cmd: "formatBlock", val: "H1", label: "Heading 1" },
-    { icon: Heading2, cmd: "formatBlock", val: "H2", label: "Heading 2" },
-    { sep: true },
-    { icon: Bold, cmd: "bold", label: "Bold" },
-    { icon: Italic, cmd: "italic", label: "Italic" },
-    { icon: UnderlineIcon, cmd: "underline", label: "Underline" },
-    { sep: true },
-    { icon: List, cmd: "insertUnorderedList", label: "Bullet list" },
-    { icon: ListOrdered, cmd: "insertOrderedList", label: "Numbered list" },
-    { icon: Quote, cmd: "formatBlock", val: "BLOCKQUOTE", label: "Quote" },
-    { icon: CodeIcon, cmd: "formatBlock", val: "PRE", label: "Code block" },
-  ] as const;
 
   return (
     <div className="flex h-full flex-col">
@@ -166,72 +159,66 @@ export function NoteEditor({ note, onChange, onDelete }: Props) {
         </Button>
       </div>
 
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-0.5 border-b border-border bg-muted/30 px-3 py-1.5">
-        {tools.map((t, i) =>
-          "sep" in t ? (
-            <Separator key={i} orientation="vertical" className="mx-1 h-5" />
-          ) : (
-            <Button
-              key={i}
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              title={t.label}
-              onClick={() => exec(t.cmd, "val" in t ? (t as any).val : undefined)}
-            >
-              <t.icon className="h-4 w-4" />
-            </Button>
-          )
-        )}
-        <Separator orientation="vertical" className="mx-1 h-5" />
-        <Button variant="ghost" size="icon" className="h-8 w-8" title="Insert link" onClick={insertLink}>
-          <LinkIcon className="h-4 w-4" />
+      {/* Insert toolbar */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-4 py-2">
+        <span className="text-xs font-medium text-muted-foreground">Add block:</span>
+        <Button variant="outline" size="sm" onClick={() => addBlock(newTextBlock(""), selectedId ?? undefined)}>
+          <Type className="mr-1.5 h-3.5 w-3.5" /> Text
         </Button>
-        <label title="Insert image" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md hover:bg-accent">
-          <ImageIcon className="h-4 w-4" />
-          <input
-            type="file" accept="image/*" className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) insertImage(f); e.target.value = ""; }}
-          />
+        <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent">
+          <ImageIcon className="h-3.5 w-3.5" /> Image
+          <input type="file" accept="image/*" multiple className="hidden"
+            onChange={(e) => { onAttachFiles(e.target.files); e.target.value = ""; }} />
         </label>
-        <label title="Attach file (PDF, etc.)" className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md hover:bg-accent">
-          <Paperclip className="h-4 w-4" />
-          <input
-            type="file" multiple className="hidden"
-            onChange={(e) => { onAttachFiles(e.target.files); e.target.value = ""; }}
-          />
+        <Button variant="outline" size="sm" onClick={() => addBlock(newDividerBlock(), selectedId ?? undefined)}>
+          <Minus className="mr-1.5 h-3.5 w-3.5" /> Divider
+        </Button>
+        <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent">
+          <Paperclip className="h-3.5 w-3.5" /> Attach file
+          <input type="file" multiple className="hidden"
+            onChange={(e) => { onAttachFiles(e.target.files); e.target.value = ""; }} />
         </label>
       </div>
 
-      {/* Editor */}
-      <div className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-3xl px-6 py-6">
-          <div
-            ref={editorRef}
-            className="note-editor min-h-[400px] outline-none text-foreground"
-            contentEditable
-            suppressContentEditableWarning
-            data-placeholder="Start writing your note…"
-            onInput={handleInput}
-          />
+      {/* Blocks editor */}
+      <div className="flex-1 overflow-auto" onMouseDown={(e) => {
+        if (e.target === e.currentTarget) setSelectedId(null);
+      }}>
+        <div className="mx-auto max-w-3xl px-12 py-8">
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+            <SortableContext items={blocks.map((b) => b.id)} strategy={verticalListSortingStrategy}>
+              <div className="space-y-2">
+                {blocks.map((b) => (
+                  <SortableBlock
+                    key={b.id}
+                    block={b}
+                    isSelected={selectedId === b.id}
+                    onSelect={() => setSelectedId(b.id)}
+                    onChange={(nb) => updateBlock(b.id, nb)}
+                    onDelete={() => deleteBlock(b.id)}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+
+          <Button variant="ghost" size="sm" className="mt-4 text-muted-foreground"
+            onClick={() => addBlock(newTextBlock(""))}>
+            <Plus className="mr-1.5 h-4 w-4" /> Add block
+          </Button>
 
           {note.attachments.length > 0 && (
-            <div className="mt-8 space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Attachments
-              </h3>
+            <div className="mt-10 space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Attachments</h3>
               <div className="grid gap-2">
                 {note.attachments.map((a) => (
-                  <div key={a.id} className="group flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+                  <div key={a.id} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
                     <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary-soft text-primary">
                       <FileText className="h-4 w-4" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{a.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {(a.size / 1024).toFixed(1)} KB · {a.kind}
-                      </p>
+                      <p className="text-xs text-muted-foreground">{(a.size / 1024).toFixed(1)} KB · {a.kind}</p>
                     </div>
                     <Button variant="ghost" size="sm" onClick={() => downloadAttachment(a)}>
                       <Download className="h-4 w-4" />
@@ -247,13 +234,68 @@ export function NoteEditor({ note, onChange, onDelete }: Props) {
         </div>
       </div>
 
-      {/* Hidden export node — always light background for clean PDF */}
+      {/* Hidden export */}
       <div className="pointer-events-none fixed -left-[9999px] top-0">
         <div ref={exportRef} style={{ width: 800, padding: 32, background: "#fff", color: "#111" }}>
           <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 16 }}>{title || "Untitled"}</h1>
-          <div className="note-editor" dangerouslySetInnerHTML={{ __html: note.content }} />
+          {blocks.map((b) => <ExportBlock key={b.id} block={b} />)}
         </div>
       </div>
     </div>
   );
+}
+
+function SortableBlock({
+  block, isSelected, onSelect, onChange, onDelete,
+}: {
+  block: Block; isSelected: boolean; onSelect: () => void;
+  onChange: (b: Block) => void; onDelete: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: block.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  return (
+    <div ref={setNodeRef} style={style} className={`block-wrapper ${isSelected ? "is-selected" : ""}`}>
+      <button {...attributes} {...listeners} className="block-handle" aria-label="Drag to reorder">
+        <GripVertical className="h-5 w-5" />
+      </button>
+      {block.type === "text" && (
+        <TextBlockView block={block} isSelected={isSelected} onSelect={onSelect}
+          onChange={(b) => onChange(b)} onDelete={onDelete} />
+      )}
+      {block.type === "image" && (
+        <ImageBlockView block={block} isSelected={isSelected} onSelect={onSelect}
+          onChange={(b) => onChange(b)} onDelete={onDelete} />
+      )}
+      {block.type === "divider" && (
+        <DividerBlockView block={block} isSelected={isSelected} onSelect={onSelect}
+          onChange={(b) => onChange(b)} onDelete={onDelete} />
+      )}
+    </div>
+  );
+}
+
+function ExportBlock({ block }: { block: Block }) {
+  if (block.type === "text") {
+    return (
+      <div
+        style={{ fontFamily: block.fontFamily, fontSize: block.fontSize, lineHeight: 1.6, margin: "8px 0" }}
+        dangerouslySetInnerHTML={{ __html: block.html }}
+      />
+    );
+  }
+  if (block.type === "image") {
+    return (
+      <div style={{ margin: "16px 0", textAlign: "center" }}>
+        <img src={block.dataUrl} alt={block.name}
+          style={{ maxWidth: "100%", width: block.width, height: block.height,
+            transform: `rotate(${block.rotation}deg)`, borderRadius: 6 }} />
+      </div>
+    );
+  }
+  return <hr style={{ borderTopStyle: block.style, borderTopWidth: 2, borderColor: "#ddd", margin: "12px 0" }} />;
 }

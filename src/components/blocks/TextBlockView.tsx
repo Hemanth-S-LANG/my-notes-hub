@@ -18,6 +18,7 @@ type FormatCmd = typeof FORMAT_COMMANDS[number];
 
 export function TextBlockView({ block, isSelected, onSelect, onChange, onDelete }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const savedRange = useRef<Range | null>(null);
   const [activeFormats, setActiveFormats] = useState<Record<FormatCmd, boolean>>({
     bold: false, italic: false, underline: false, insertUnorderedList: false, insertOrderedList: false,
   });
@@ -37,11 +38,27 @@ export function TextBlockView({ block, isSelected, onSelect, onChange, onDelete 
     setActiveFormats(next);
   };
 
+  const saveSelection = () => {
+    const editor = ref.current;
+    const selection = window.getSelection();
+    if (!editor || !selection?.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (editor.contains(range.commonAncestorContainer)) savedRange.current = range.cloneRange();
+  };
+
+  const restoreSelection = () => {
+    const selection = window.getSelection();
+    if (!selection || !savedRange.current) return;
+    selection.removeAllRanges();
+    selection.addRange(savedRange.current);
+  };
+
   const exec = (cmd: FormatCmd) => {
-    // Make sure the editable has focus & selection before running the command
+    restoreSelection();
     ref.current?.focus();
-    document.execCommand(cmd, false);
+    document.execCommand(cmd, false, undefined);
     if (ref.current) onChange({ ...block, html: ref.current.innerHTML });
+    saveSelection();
     refreshActiveFormats();
   };
 
@@ -91,9 +108,9 @@ export function TextBlockView({ block, isSelected, onSelect, onChange, onDelete 
         className="block-text outline-none"
         style={{ fontFamily: block.fontFamily, fontSize: `${block.fontSize}px`, lineHeight: 1.6, minHeight: "1.6em" }}
         onInput={(e) => { onChange({ ...block, html: (e.target as HTMLDivElement).innerHTML }); refreshActiveFormats(); }}
-        onKeyUp={refreshActiveFormats}
-        onMouseUp={refreshActiveFormats}
-        onFocus={refreshActiveFormats}
+        onKeyUp={() => { saveSelection(); refreshActiveFormats(); }}
+        onMouseUp={() => { saveSelection(); refreshActiveFormats(); }}
+        onFocus={() => { saveSelection(); refreshActiveFormats(); }}
       />
     </div>
   );

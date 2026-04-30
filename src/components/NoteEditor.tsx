@@ -160,7 +160,7 @@ export function NoteEditor({ note, onChange, onDelete }: Props) {
       </div>
 
       {/* Insert toolbar */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-4 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 sm:px-4">
         <span className="text-xs font-medium text-muted-foreground">Add block:</span>
         <Button variant="outline" size="sm" onClick={() => addBlock(newTextBlock(""), selectedId ?? undefined)}>
           <Type className="mr-1.5 h-3.5 w-3.5" /> Text

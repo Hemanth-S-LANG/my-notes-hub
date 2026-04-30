@@ -55,7 +55,7 @@ export function Sidebar(p: Props) {
     p.notes.filter((n) => n.folderId === id).length;
 
   return (
-    <aside className="flex h-full w-80 flex-col border-r border-border bg-card/40">
+    <aside className="flex h-full w-full flex-col border-r border-border bg-card/40 md:w-80">
       {/* Brand */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">

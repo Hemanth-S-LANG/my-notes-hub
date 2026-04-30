@@ -184,7 +184,7 @@ export function NoteEditor({ note, onChange, onDelete }: Props) {
       <div className="flex-1 overflow-auto" onMouseDown={(e) => {
         if (e.target === e.currentTarget) setSelectedId(null);
       }}>
-        <div className="mx-auto max-w-3xl px-12 py-8">
+        <div className="mx-auto max-w-3xl px-3 py-4 sm:px-8 sm:py-6 md:px-12 md:py-8">
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={blocks.map((b) => b.id)} strategy={verticalListSortingStrategy}>
               <div className="space-y-2">

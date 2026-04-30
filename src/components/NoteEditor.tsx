@@ -144,12 +144,12 @@ export function NoteEditor({ note, onChange, onDelete }: Props) {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center gap-2 border-b border-border bg-card/50 px-4 py-3 backdrop-blur">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card/50 px-3 py-2 backdrop-blur sm:px-4 sm:py-3">
         <Input
           value={title}
           onChange={(e) => { setTitle(e.target.value); update({ title: e.target.value }); }}
           placeholder="Untitled note"
-          className="h-9 border-0 bg-transparent px-0 text-lg font-semibold shadow-none focus-visible:ring-0"
+          className="h-9 min-w-0 flex-1 border-0 bg-transparent px-0 text-base font-semibold shadow-none focus-visible:ring-0 sm:text-lg"
         />
         <Button variant="outline" size="sm" onClick={exportPdf}>
           <Download className="mr-1.5 h-4 w-4" /> PDF

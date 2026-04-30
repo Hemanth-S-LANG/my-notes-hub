@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { FileText } from "lucide-react";
+import { FileText, Menu, X } from "lucide-react";
 import {
   Folder, Note, loadFolders, loadNotes, saveFolders, saveNotes, uid, themeStorage,
 } from "@/lib/notes-store";

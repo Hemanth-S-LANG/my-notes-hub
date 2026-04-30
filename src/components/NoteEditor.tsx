@@ -144,12 +144,12 @@ export function NoteEditor({ note, onChange, onDelete }: Props) {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center gap-2 border-b border-border bg-card/50 px-4 py-3 backdrop-blur">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card/50 px-3 py-2 backdrop-blur sm:px-4 sm:py-3">
         <Input
           value={title}
           onChange={(e) => { setTitle(e.target.value); update({ title: e.target.value }); }}
           placeholder="Untitled note"
-          className="h-9 border-0 bg-transparent px-0 text-lg font-semibold shadow-none focus-visible:ring-0"
+          className="h-9 min-w-0 flex-1 border-0 bg-transparent px-0 text-base font-semibold shadow-none focus-visible:ring-0 sm:text-lg"
         />
         <Button variant="outline" size="sm" onClick={exportPdf}>
           <Download className="mr-1.5 h-4 w-4" /> PDF
@@ -160,7 +160,7 @@ export function NoteEditor({ note, onChange, onDelete }: Props) {
       </div>
 
       {/* Insert toolbar */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-4 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 sm:px-4">
         <span className="text-xs font-medium text-muted-foreground">Add block:</span>
         <Button variant="outline" size="sm" onClick={() => addBlock(newTextBlock(""), selectedId ?? undefined)}>
           <Type className="mr-1.5 h-3.5 w-3.5" /> Text
@@ -184,7 +184,7 @@ export function NoteEditor({ note, onChange, onDelete }: Props) {
       <div className="flex-1 overflow-auto" onMouseDown={(e) => {
         if (e.target === e.currentTarget) setSelectedId(null);
       }}>
-        <div className="mx-auto max-w-3xl px-12 py-8">
+        <div className="mx-auto max-w-3xl px-3 py-4 sm:px-8 sm:py-6 md:px-12 md:py-8">
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={blocks.map((b) => b.id)} strategy={verticalListSortingStrategy}>
               <div className="space-y-2">

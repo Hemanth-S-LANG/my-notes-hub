@@ -216,12 +216,16 @@
 .block-wrapper.is-selected { background: color-mix(in oklab, var(--primary) 8%, transparent); outline: 2px solid color-mix(in oklab, var(--primary) 40%, transparent); }
 .block-handle {
   position: absolute;
-  left: -28px;
+  left: -22px;
   top: 10px;
   opacity: 0;
   cursor: grab;
   transition: opacity 0.15s;
   color: var(--muted-foreground);
+}
+@media (max-width: 640px) {
+  .block-handle { left: -4px; top: 4px; opacity: 1; }
+  .block-wrapper { padding-left: 18px; }
 }
 .block-wrapper:hover .block-handle, .block-wrapper.is-selected .block-handle { opacity: 1; }
 .block-handle:active { cursor: grabbing; }

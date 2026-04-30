@@ -28,6 +28,7 @@ function Index() {
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Init theme + load data
   useEffect(() => {

@@ -110,32 +110,61 @@ function Index() {
   };
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
-      <Sidebar
-        folders={folders}
-        notes={notes}
-        activeFolderId={activeFolderId}
-        activeNoteId={activeNoteId}
-        selectMode={selectMode}
-        selectedIds={selectedIds}
-        onSelectFolder={(id) => { setActiveFolderId(id); }}
-        onSelectNote={setActiveNoteId}
-        onCreateNote={createNote}
-        onCreateFolder={createFolder}
-        onDeleteFolder={deleteFolder}
-        onToggleSelect={toggleSelect}
-        onSetSelectMode={setSelectMode}
-        onBulkDelete={bulkDelete}
-        onBulkMove={bulkMove}
-        onClearSelection={() => setSelectedIds(new Set())}
-      />
+    <div className="flex h-[100dvh] w-full overflow-hidden bg-background text-foreground">
+      {/* Sidebar: static on md+, slide-over on mobile */}
+      <div
+        className={
+          "fixed inset-y-0 left-0 z-40 w-[85vw] max-w-sm transform transition-transform duration-200 md:static md:z-auto md:w-80 md:max-w-none md:translate-x-0 " +
+          (sidebarOpen ? "translate-x-0" : "-translate-x-full")
+        }
+      >
+        <Sidebar
+          folders={folders}
+          notes={notes}
+          activeFolderId={activeFolderId}
+          activeNoteId={activeNoteId}
+          selectMode={selectMode}
+          selectedIds={selectedIds}
+          onSelectFolder={(id) => { setActiveFolderId(id); }}
+          onSelectNote={(id) => { setActiveNoteId(id); setSidebarOpen(false); }}
+          onCreateNote={() => { createNote(); setSidebarOpen(false); }}
+          onCreateFolder={createFolder}
+          onDeleteFolder={deleteFolder}
+          onToggleSelect={toggleSelect}
+          onSetSelectMode={setSelectMode}
+          onBulkDelete={bulkDelete}
+          onBulkMove={bulkMove}
+          onClearSelection={() => setSelectedIds(new Set())}
+        />
+      </div>
 
-      <main className="flex-1 overflow-hidden">
-        {activeNote ? (
-          <NoteEditor note={activeNote} onChange={updateNote} onDelete={deleteNote} />
-        ) : (
-          <EmptyState onCreate={createNote} />
-        )}
+      {/* Mobile backdrop */}
+      {sidebarOpen && (
+        <button
+          aria-label="Close menu"
+          className="fixed inset-0 z-30 bg-black/40 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* Mobile top bar */}
+        <div className="flex items-center gap-2 border-b border-border bg-card/60 px-3 py-2 md:hidden">
+          <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
+            {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </Button>
+          <span className="truncate text-sm font-semibold">
+            {activeNote?.title || "Notable"}
+          </span>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {activeNote ? (
+            <NoteEditor note={activeNote} onChange={updateNote} onDelete={deleteNote} />
+          ) : (
+            <EmptyState onCreate={createNote} />
+          )}
+        </div>
       </main>
     </div>
   );

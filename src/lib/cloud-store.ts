@@ -187,8 +187,8 @@ export async function migrateLocalToCloud(userId: string): Promise<{ folders: nu
         if (b.type === "image" && b.dataUrl?.startsWith("data:")) {
           try {
             const file = await dataUrlToFile(b.dataUrl, b.name || "image");
-            const { path } = await uploadAttachment(userId, file);
-            newBlocks.push({ ...b, dataUrl: path }); // store path; resolve to URL on display
+            const { path, signedUrl } = await uploadAttachment(userId, file);
+            newBlocks.push({ ...b, dataUrl: signedUrl, storagePath: path });
           } catch (e) {
             console.error("Image upload failed during migration", e);
             newBlocks.push(b);
@@ -204,8 +204,8 @@ export async function migrateLocalToCloud(userId: string): Promise<{ folders: nu
         if (a.dataUrl?.startsWith("data:")) {
           try {
             const file = await dataUrlToFile(a.dataUrl, a.name);
-            const { path } = await uploadAttachment(userId, file);
-            newAtts.push({ ...a, dataUrl: path });
+            const { path, signedUrl } = await uploadAttachment(userId, file);
+            newAtts.push({ ...a, dataUrl: signedUrl, storagePath: path });
           } catch (e) {
             console.error("Attachment upload failed", e);
           }

@@ -18,6 +18,7 @@ import {
   Note, Block, Attachment, fileToDataUrl, attachmentKind, uid,
   newTextBlock, newImageBlock, newDividerBlock,
 } from "@/lib/notes-store";
+import { uploadAttachment } from "@/lib/cloud-store";
 import { TextBlockView } from "./blocks/TextBlockView";
 import { ImageBlockView } from "./blocks/ImageBlockView";
 import { DividerBlockView } from "./blocks/DividerBlockView";
@@ -27,6 +28,7 @@ interface Props {
   note: Note;
   onChange: (n: Note) => void;
   onDelete: (id: string) => void;
+  userId?: string | null;
 }
 
 // Migrate legacy notes (HTML content -> single text block)
@@ -36,7 +38,7 @@ function getBlocks(note: Note): Block[] {
   return [newTextBlock("")];
 }
 
-export function NoteEditor({ note, onChange, onDelete }: Props) {
+export function NoteEditor({ note, onChange, onDelete, userId }: Props) {
   const [title, setTitle] = useState(note.title);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -85,10 +87,32 @@ export function NoteEditor({ note, onChange, onDelete }: Props) {
     const newAtts: Attachment[] = [];
     for (const file of Array.from(files)) {
       try {
-        const dataUrl = await fileToDataUrl(file);
         const kind = attachmentKind(file.type);
+
+        // Use cloud storage when a user is signed in
+        if (userId) {
+          const { path, signedUrl } = await uploadAttachment(userId, file);
+          if (kind === "image") {
+            const img = new Image();
+            img.src = signedUrl;
+            await new Promise((r) => (img.onload = r));
+            const maxW = 520;
+            const w = Math.min(img.naturalWidth, maxW);
+            const h = (img.naturalHeight * w) / img.naturalWidth;
+            const block = { ...newImageBlock(signedUrl, file.name, w, h), storagePath: path };
+            addBlock(block, selectedId ?? blocks[blocks.length - 1]?.id);
+            continue;
+          }
+          newAtts.push({
+            id: uid(), name: file.name, type: file.type, dataUrl: signedUrl,
+            size: file.size, kind, storagePath: path,
+          });
+          continue;
+        }
+
+        // Fallback: local data URL (no auth)
+        const dataUrl = await fileToDataUrl(file);
         if (kind === "image") {
-          // load to detect natural size for sensible default
           const img = new Image();
           img.src = dataUrl;
           await new Promise((r) => (img.onload = r));
@@ -99,7 +123,8 @@ export function NoteEditor({ note, onChange, onDelete }: Props) {
           continue;
         }
         newAtts.push({ id: uid(), name: file.name, type: file.type, dataUrl, size: file.size, kind });
-      } catch {
+      } catch (e) {
+        console.error(e);
         toast.error(`Failed to attach ${file.name}`);
       }
     }

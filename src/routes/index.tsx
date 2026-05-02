@@ -1,9 +1,15 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { FileText, Menu, X } from "lucide-react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { FileText, Menu, X, Loader2 } from "lucide-react";
 import {
-  Folder, Note, loadFolders, loadNotes, saveFolders, saveNotes, uid, themeStorage,
+  Folder, Note, themeStorage,
 } from "@/lib/notes-store";
+import {
+  fetchFolders, fetchNotes, createFolderRow, deleteFolderRow,
+  createNoteRow, upsertNoteRow, deleteNoteRow, deleteAttachmentFile,
+  migrateLocalToCloud,
+} from "@/lib/cloud-store";
+import { useAuth } from "@/lib/auth-context";
 import { Sidebar } from "@/components/NotesSidebar";
 import { NoteEditor } from "@/components/NoteEditor";
 import { Button } from "@/components/ui/button";
@@ -22,6 +28,8 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
+  const { user, loading: authLoading, signOut } = useAuth();
+  const navigate = useNavigate();
   const [folders, setFolders] = useState<Folder[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeFolderId, setActiveFolderId] = useState<string | null | "all">("all");
@@ -29,60 +37,123 @@ function Index() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [dataLoading, setDataLoading] = useState(true);
 
-  // Init theme + load data
+  // Init theme
   useEffect(() => {
     const t = themeStorage.get();
     document.documentElement.classList.toggle("dark", t === "dark");
-    setFolders(loadFolders());
-    setNotes(loadNotes());
   }, []);
 
-  // Persist
-  useEffect(() => { saveFolders(folders); }, [folders]);
-  useEffect(() => { saveNotes(notes); }, [notes]);
+  // Redirect to /login when not authenticated
+  useEffect(() => {
+    if (!authLoading && !user) {
+      navigate({ to: "/login" });
+    }
+  }, [authLoading, user, navigate]);
+
+  // Load cloud data + migrate localStorage on first sign-in
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      setDataLoading(true);
+      try {
+        const migrated = await migrateLocalToCloud(user.id);
+        if (migrated.notes > 0 || migrated.folders > 0) {
+          toast.success(`Imported ${migrated.notes} note(s) and ${migrated.folders} folder(s) from this device.`);
+        }
+        const [f, n] = await Promise.all([fetchFolders(user.id), fetchNotes(user.id)]);
+        if (cancelled) return;
+        setFolders(f);
+        setNotes(n);
+      } catch (e) {
+        console.error(e);
+        toast.error("Failed to load your notes.");
+      } finally {
+        if (!cancelled) setDataLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // Debounced auto-save per note
+  const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const queueSave = (n: Note) => {
+    if (!user) return;
+    const timers = saveTimers.current;
+    const existing = timers.get(n.id);
+    if (existing) clearTimeout(existing);
+    const t = setTimeout(async () => {
+      try { await upsertNoteRow(user.id, n); }
+      catch (e) { console.error(e); toast.error("Couldn't save note."); }
+    }, 600);
+    timers.set(n.id, t);
+  };
 
   const activeNote = useMemo(
     () => notes.find((n) => n.id === activeNoteId) || null,
     [notes, activeNoteId]
   );
 
-  const createNote = () => {
+  const createNote = async () => {
+    if (!user) return;
     const folderId = activeFolderId === "all" ? null : (activeFolderId as string | null);
-    const n: Note = {
-      id: uid(),
-      folderId,
-      title: "",
-      content: "",
-      attachments: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    setNotes((prev) => [n, ...prev]);
-    setActiveNoteId(n.id);
+    try {
+      const n = await createNoteRow(user.id, folderId);
+      setNotes((prev) => [n, ...prev]);
+      setActiveNoteId(n.id);
+    } catch (e) {
+      console.error(e); toast.error("Couldn't create note.");
+    }
   };
 
   const updateNote = (n: Note) => {
     setNotes((prev) => prev.map((x) => (x.id === n.id ? n : x)));
+    queueSave(n);
   };
 
-  const deleteNote = (id: string) => {
+  const deleteNote = async (id: string) => {
+    const note = notes.find((n) => n.id === id);
     setNotes((prev) => prev.filter((n) => n.id !== id));
     if (activeNoteId === id) setActiveNoteId(null);
-    toast.success("Note deleted");
+    try {
+      await deleteNoteRow(id);
+      // Best-effort cleanup of storage objects
+      if (note) {
+        const paths = [
+          ...(note.blocks ?? []).filter((b) => b.type === "image" && b.storagePath).map((b) => (b as { storagePath: string }).storagePath),
+          ...(note.attachments ?? []).filter((a) => a.storagePath).map((a) => a.storagePath as string),
+        ];
+        await Promise.all(paths.map((p) => deleteAttachmentFile(p).catch(() => {})));
+      }
+      toast.success("Note deleted");
+    } catch (e) {
+      console.error(e); toast.error("Couldn't delete note.");
+    }
   };
 
-  const createFolder = (name: string) => {
-    const f: Folder = { id: uid(), name, createdAt: Date.now() };
-    setFolders((prev) => [...prev, f]);
-    toast.success(`Folder “${name}” created`);
+  const createFolder = async (name: string) => {
+    if (!user) return;
+    try {
+      const f = await createFolderRow(user.id, name);
+      setFolders((prev) => [...prev, f]);
+      toast.success(`Folder “${name}” created`);
+    } catch (e) {
+      console.error(e); toast.error("Couldn't create folder.");
+    }
   };
 
-  const deleteFolder = (id: string) => {
+  const deleteFolder = async (id: string) => {
     setFolders((prev) => prev.filter((f) => f.id !== id));
     setNotes((prev) => prev.map((n) => (n.folderId === id ? { ...n, folderId: null } : n)));
     if (activeFolderId === id) setActiveFolderId("all");
-    toast.success("Folder deleted (notes moved to Unfiled)");
+    try {
+      await deleteFolderRow(id);
+      toast.success("Folder deleted (notes moved to Unfiled)");
+    } catch (e) {
+      console.error(e); toast.error("Couldn't delete folder.");
+    }
   };
 
   const toggleSelect = (id: string) => {
@@ -94,24 +165,54 @@ function Index() {
     });
   };
 
-  const bulkDelete = () => {
-    setNotes((prev) => prev.filter((n) => !selectedIds.has(n.id)));
-    if (activeNoteId && selectedIds.has(activeNoteId)) setActiveNoteId(null);
-    toast.success(`${selectedIds.size} note(s) deleted`);
+  const bulkDelete = async () => {
+    const ids = [...selectedIds];
+    setNotes((prev) => prev.filter((n) => !ids.includes(n.id)));
+    if (activeNoteId && ids.includes(activeNoteId)) setActiveNoteId(null);
     setSelectedIds(new Set());
     setSelectMode(false);
+    try {
+      await Promise.all(ids.map((id) => deleteNoteRow(id)));
+      toast.success(`${ids.length} note(s) deleted`);
+    } catch (e) {
+      console.error(e); toast.error("Some notes couldn't be deleted.");
+    }
   };
 
-  const bulkMove = (folderId: string | null) => {
-    setNotes((prev) => prev.map((n) => (selectedIds.has(n.id) ? { ...n, folderId, updatedAt: Date.now() } : n)));
-    toast.success(`${selectedIds.size} note(s) moved`);
+  const bulkMove = async (folderId: string | null) => {
+    if (!user) return;
+    const ids = [...selectedIds];
+    const updated: Note[] = [];
+    setNotes((prev) =>
+      prev.map((n) => {
+        if (!ids.includes(n.id)) return n;
+        const next = { ...n, folderId, updatedAt: Date.now() };
+        updated.push(next);
+        return next;
+      })
+    );
     setSelectedIds(new Set());
     setSelectMode(false);
+    try {
+      await Promise.all(updated.map((n) => upsertNoteRow(user.id, n)));
+      toast.success(`${ids.length} note(s) moved`);
+    } catch (e) {
+      console.error(e); toast.error("Some notes couldn't be moved.");
+    }
   };
+
+  if (authLoading || (user && dataLoading)) {
+    return (
+      <div className="flex h-[100dvh] items-center justify-center bg-background text-muted-foreground">
+        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading your notes…
+      </div>
+    );
+  }
+
+  if (!user) return null; // redirecting
 
   return (
     <div className="flex h-[100dvh] w-full overflow-hidden bg-background text-foreground">
-      {/* Sidebar: static on md+, slide-over on mobile */}
       <div
         className={
           "fixed inset-y-0 left-0 z-40 w-[85vw] max-w-sm transform transition-transform duration-200 md:static md:z-auto md:w-80 md:max-w-none md:translate-x-0 " +
@@ -135,10 +236,11 @@ function Index() {
           onBulkDelete={bulkDelete}
           onBulkMove={bulkMove}
           onClearSelection={() => setSelectedIds(new Set())}
+          userEmail={user.email ?? null}
+          onSignOut={async () => { await signOut(); navigate({ to: "/login" }); }}
         />
       </div>
 
-      {/* Mobile backdrop */}
       {sidebarOpen && (
         <button
           aria-label="Close menu"
@@ -148,7 +250,6 @@ function Index() {
       )}
 
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Mobile top bar */}
         <div className="flex items-center gap-2 border-b border-border bg-card/60 px-3 py-2 md:hidden">
           <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
             {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -160,7 +261,7 @@ function Index() {
 
         <div className="min-h-0 flex-1 overflow-hidden">
           {activeNote ? (
-            <NoteEditor note={activeNote} onChange={updateNote} onDelete={deleteNote} />
+            <NoteEditor note={activeNote} onChange={updateNote} onDelete={deleteNote} userId={user.id} />
           ) : (
             <EmptyState onCreate={createNote} />
           )}

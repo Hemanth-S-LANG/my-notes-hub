@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FolderPlus, Folder as FolderIcon, FileText, Plus, Search, Trash2, ChevronRight, Inbox, MoveRight, Check, X } from "lucide-react";
+import { FolderPlus, Folder as FolderIcon, FileText, Plus, Search, Trash2, ChevronRight, Inbox, MoveRight, Check, X, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Folder, Note } from "@/lib/notes-store";
@@ -27,6 +27,8 @@ interface Props {
   onBulkDelete: () => void;
   onBulkMove: (folderId: string | null) => void;
   onClearSelection: () => void;
+  userEmail?: string | null;
+  onSignOut?: () => void;
 }
 
 export function Sidebar(p: Props) {
@@ -217,6 +219,19 @@ export function Sidebar(p: Props) {
           })
         )}
       </div>
+
+      {(p.userEmail || p.onSignOut) && (
+        <div className="flex items-center gap-2 border-t border-border px-3 py-2">
+          <div className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={p.userEmail ?? ""}>
+            {p.userEmail}
+          </div>
+          {p.onSignOut && (
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={p.onSignOut}>
+              <LogOut className="mr-1 h-3.5 w-3.5" /> Sign out
+            </Button>
+          )}
+        </div>
+      )}
     </aside>
   );
 }

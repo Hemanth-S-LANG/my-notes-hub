@@ -69,7 +69,33 @@ export async function fetchNotes(userId: string): Promise<Note[]> {
     .eq("user_id", userId)
     .order("updated_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []).map((r) => rowToNote(r as NoteRow));
+  const notes = (data ?? []).map((r) => rowToNote(r as NoteRow));
+  // Resolve signed URLs for any attachments/images that have a storage path
+  await Promise.all(notes.map(resolveNoteUrls));
+  return notes;
+}
+
+export async function resolveNoteUrls(n: Note): Promise<void> {
+  const tasks: Promise<void>[] = [];
+  for (const b of n.blocks ?? []) {
+    if (b.type === "image" && b.storagePath) {
+      tasks.push(
+        signAttachment(b.storagePath)
+          .then((url) => { b.dataUrl = url; })
+          .catch((e) => console.error("sign image failed", e))
+      );
+    }
+  }
+  for (const a of n.attachments ?? []) {
+    if (a.storagePath) {
+      tasks.push(
+        signAttachment(a.storagePath)
+          .then((url) => { a.dataUrl = url; })
+          .catch((e) => console.error("sign attachment failed", e))
+      );
+    }
+  }
+  await Promise.all(tasks);
 }
 
 export async function createNoteRow(userId: string, folderId: string | null): Promise<Note> {

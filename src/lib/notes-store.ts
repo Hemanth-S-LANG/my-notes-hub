@@ -3,9 +3,10 @@ export type Attachment = {
   id: string;
   name: string;
   type: string; // mime
-  dataUrl: string; // base64 data URL
+  dataUrl: string; // base64 data URL OR resolved (signed) URL when stored in cloud
   size: number;
   kind: "image" | "pdf" | "file";
+  storagePath?: string; // path in Supabase Storage when applicable
 };
 
 export type TextBlock = {
@@ -19,7 +20,8 @@ export type TextBlock = {
 export type ImageBlock = {
   id: string;
   type: "image";
-  dataUrl: string;
+  dataUrl: string;     // resolved URL (signed) or data: URL during creation
+  storagePath?: string; // path in Supabase Storage when applicable
   name: string;
   width: number;   // px
   height: number;  // px

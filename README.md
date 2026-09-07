@@ -2,7 +2,7 @@
 
 A modern personal note-taking app built with React, TypeScript, Vite, Supabase, and Tailwind CSS.
 
-Live demo: https://keeper-mind-safe.lovable.app/
+
 
 ## Overview
 
